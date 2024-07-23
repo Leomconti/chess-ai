@@ -143,9 +143,3 @@ async def websocket_endpoint(websocket: WebSocket):
 async def broadcast_chat_update():
     for client in connected_clients:
         await client.send_json({"type": "chat_update", "chat_history": [msg.dict() for msg in chat_history]})
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=8000)
