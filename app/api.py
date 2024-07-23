@@ -6,7 +6,7 @@ import chess
 import chess.engine
 import instructor
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
@@ -25,6 +25,8 @@ moves = []
 chat_history = []
 
 llm = instructor.from_openai(OpenAI())
+
+connected_clients = set()
 
 
 class ChatMessage(BaseModel):
@@ -46,7 +48,7 @@ class ChessAgent:
     legal_moves: str
     history: str
     feedback: str = None  # type: ignore
-    next_move: NextMove = None # type: ignore
+    next_move: NextMove = None  # type: ignore
     conversation_history: List[ChatMessage] = field(default_factory=list)
 
     def __post_init__(self):
@@ -82,7 +84,7 @@ async def make_move(move: Move):
     if player_move in board.legal_moves:
         board.push(player_move)
         moves.append(player_move.uci())
-        chat_history.append(ChatMessage(sender="user", content=f"Moved {player_move.uci()}"))
+        # chat_history.append(ChatMessage(sender="user", content=f"Moved {player_move.uci()}"))
 
         # Generate AI move
         ai_agent = ChessAgent(
@@ -96,8 +98,11 @@ async def make_move(move: Move):
         moves.append(ai_move.uci())
 
         # Add AI's move and shit talk to chat history
-        chat_history.append(ChatMessage(sender="ai", content=f"Moved {ai_move.uci()}"))
+        # chat_history.append(ChatMessage(sender="ai", content=f"Moved {ai_move.uci()}"))
         chat_history.append(ChatMessage(sender="ai", content=ai_agent.next_move.shit_talk))
+
+        # Broadcast chat update to all connected clients
+        await broadcast_chat_update()
 
         return {
             "player_move": player_move.uci(),
@@ -105,8 +110,7 @@ async def make_move(move: Move):
             "board_fen": board.fen(),
             "game_over": board.is_game_over(),
             "reasoning": ai_agent.next_move.reasoning,
-            "shit_talk": ai_agent.next_move.shit_talk,
-            "chat_history": chat_history,
+            "chat_history": [msg.dict() for msg in chat_history],
         }
     else:
         return {"error": "Invalid move"}
@@ -124,11 +128,20 @@ async def reset_game():
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    while True:
-        data = await websocket.receive_json()
-        if data["type"] == "chat":
-            chat_history.append(ChatMessage(sender="user", content=data["message"]))
-            await websocket.send_json({"type": "chat_update", "chat_history": [msg.dict() for msg in chat_history]})
+    connected_clients.add(websocket)
+    try:
+        while True:
+            data = await websocket.receive_json()
+            if data["type"] == "chat":
+                chat_history.append(ChatMessage(sender="user", content=data["message"]))
+                await broadcast_chat_update()
+    except WebSocketDisconnect:
+        connected_clients.remove(websocket)
+
+
+async def broadcast_chat_update():
+    for client in connected_clients:
+        await client.send_json({"type": "chat_update", "chat_history": [msg.dict() for msg in chat_history]})
 
 
 if __name__ == "__main__":

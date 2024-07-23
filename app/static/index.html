@@ -79,7 +79,10 @@
       let socket = new WebSocket("ws://localhost:8000/ws");
 
       socket.onmessage = function (event) {
-        addChatMessage("AI", event.data);
+        var data = JSON.parse(event.data);
+        if (data.type === "chat_update") {
+          updateChatHistory(data.chat_history);
+        }
       };
 
       function onDragStart(source, piece, position, orientation) {
@@ -121,7 +124,7 @@
             return;
           }
           board.position(data.board_fen);
-          addChatMessage("AI", `I moved ${data.ai_move}. ${data.reasoning}`);
+          updateChatHistory(data.chat_history);
           updateStatus(data.game_over);
         } catch (error) {
           console.error("Error:", error);
@@ -175,13 +178,6 @@
           $("#chat-input").val("");
         }
       });
-
-      socket.onmessage = function (event) {
-        var data = JSON.parse(event.data);
-        if (data.type === "chat_update") {
-          updateChatHistory(data.chat_history);
-        }
-      };
     </script>
   </body>
 </html>
