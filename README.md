@@ -1,6 +1,9 @@
-# AI Chess
+# AI Chess + talk
 
 AI Chess is a cool and interactive web-based chess game that combines the classic game of chess with cutting-edge AI technology. Play against an AI opponent that not only makes strategic moves but also engages in witty banter!
+
+![image](https://github.com/user-attachments/assets/28bb1595-2c2a-47b0-80e9-fd745bd723d4)
+
 
 ## Features
 
