@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass, field
-from typing import List
+from typing import Dict, List
 
 import chess
 import chess.engine
@@ -10,7 +10,15 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+"""
+disclaimer, this is not how I usually write production code, 
+it's way cleaner, more structured and all that, but this is a quick thing, 
+so I just wanted to get it out there and test possibilities.
+
+claude was goated with the frontend work, so shoutout to him as well
+"""
 
 load_dotenv()
 app = FastAPI()
@@ -36,30 +44,48 @@ class ChatMessage(BaseModel):
 
 class NextMove(BaseModel):
     move: str = Field(
-        ..., description="The best move to win the chess game. It should be in standard algebraic notation."
+        ...,
+        description="The best move to win the chess game. It should be in standard algebraic notation, such as e2e4, e7e5, c6d4 etc.",
     )
     reasoning: str = Field(..., description="Reasoning explaining why the move is the best one.")
     shit_talk: str = Field(..., description="Shit talk about the player, the game, and tease the player.")
 
+    @field_validator("move")
+    @classmethod
+    def validate_move(cls, v):
+        try:
+            board.parse_san(v)
+        except Exception as e:
+            raise ValueError(
+                f"Move must be in standard algebraic notation, such as e2e4, e7e5, c6d4 etc, for the black player. Exception: {e}",
+            )
+        return v
 
-@dataclass
+
 class ChessAgent:
-    board_state: str
-    legal_moves: str
-    history: str
-    feedback: str = None  # type: ignore
-    next_move: NextMove = None  # type: ignore
-    conversation_history: List[ChatMessage] = field(default_factory=list)
+    def __init__(
+        self, board_state: str, legal_moves: str, history: str, feedback: str = "", chat_history: List[ChatMessage] = []
+    ):
+        print("chat history", chat_history)
+        self.board_state = board_state
+        self.legal_moves = legal_moves
+        self.history = history
+        self.feedback = feedback
+        self.chat_history = chat_history
+        self.next_move = self.generate_next_move()
 
-    def __post_init__(self):
-        self.next_move = llm.chat.completions.create(
+    def generate_next_move(self) -> NextMove:
+        return llm.chat.completions.create(
             model="gpt-4o-mini",
             response_model=NextMove,
             messages=[
-                {"role": "system", "content": "You are a chess grand master with a penchant for trash talk."},
                 {
                     "role": "system",
-                    "content": f"Given the current state of the chess board: {self.board_state}, legal moves: {self.legal_moves}, history of moves so far: {self.history}, and feedback on the previous move generated: {self.feedback}, generate the next move. The next move should be in standard algebraic notation like e2e4, e7e5, c6d4 etc. Also, provide some witty trash talk to tease the player.",
+                    "content": "You are a chess grand master with a penchant for trash talk. You make your moves in a way that is both strategic and trash talkative, and keep engaging the conversation with the user.",
+                },
+                {
+                    "role": "system",
+                    "content": f"You're playing black. Given the current state of the chess board: {self.board_state}, legal moves: {self.legal_moves}, history of moves so far: {self.history}, and feedback on the previous move generated: {self.feedback}, generate the next move. The next move should be in standard algebraic notation like e2e4, e7e5, c6d4 etc. Also, provide some witty trash talk to tease the player. Conversation History: {self.chat_history[-7:]}",
                 },
             ],
         )
@@ -88,10 +114,14 @@ async def make_move(move: Move):
 
             # Generate AI move
             ai_agent = ChessAgent(
-                board_state=str(board), legal_moves=str(board.legal_moves), history=str(moves), feedback=""
+                board_state=str(board),
+                legal_moves=str(board.legal_moves),
+                history=str(moves),
+                feedback="",
+                chat_history=chat_history,
             )
-            ai_move_str = ai_agent.next_move.move
-            ai_move = board.parse_san(ai_move_str)
+
+            ai_move = board.parse_san(ai_agent.next_move.move)
 
             # Make the AI's move
             board.push(ai_move)
