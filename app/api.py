@@ -1,5 +1,5 @@
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List
 
 import chess
@@ -22,9 +22,14 @@ app.mount("/img", StaticFiles(directory="app/img"), name="img")
 board = chess.Board()
 engine = chess.engine.SimpleEngine.popen_uci("/opt/homebrew/bin/stockfish")
 moves = []
-
+chat_history = []
 
 llm = instructor.from_openai(OpenAI())
+
+
+class ChatMessage(BaseModel):
+    sender: str
+    content: str
 
 
 class NextMove(BaseModel):
@@ -34,9 +39,6 @@ class NextMove(BaseModel):
     reasoning: str = Field(..., description="Reasoning explaining why the move is the best one.")
     shit_talk: str = Field(..., description="Shit talk about the player, the game, and tease the player.")
 
-    # TODO: add a validator here that will check if the move is in the correct algebraic notation for chess,
-    # if it's not instructor will send it back and retry
-
 
 @dataclass
 class ChessAgent:
@@ -44,21 +46,18 @@ class ChessAgent:
     legal_moves: str
     history: str
     feedback: str = None  # type: ignore
-    # next move is the output field it will be null initially
-    next_move: NextMove = None  # type: ignore
-    conversation_history: List[str] = []
+    next_move: NextMove = None # type: ignore
+    conversation_history: List[ChatMessage] = field(default_factory=list)
 
-    # Post init is a function that runs after the dataclass has been initialized
     def __post_init__(self):
-        # get the next move from the model
         self.next_move = llm.chat.completions.create(
             model="gpt-4o-mini",
             response_model=NextMove,
             messages=[
-                {"role": "system", "content": "You are a chess grand master."},
+                {"role": "system", "content": "You are a chess grand master with a penchant for trash talk."},
                 {
                     "role": "system",
-                    "content": f"Given the current state of the chess board: {self.board_state}, legal moves: {self.legal_moves}, history of moves so far: {self.history}, and feedback on the previous move generated: {self.feedback}, generate the next move. The next move should be in standard algebraic notation like e2e4, e7e5, c6d4 etc.",
+                    "content": f"Given the current state of the chess board: {self.board_state}, legal moves: {self.legal_moves}, history of moves so far: {self.history}, and feedback on the previous move generated: {self.feedback}, generate the next move. The next move should be in standard algebraic notation like e2e4, e7e5, c6d4 etc. Also, provide some witty trash talk to tease the player.",
                 },
             ],
         )
@@ -76,13 +75,14 @@ async def read_root():
 
 @app.post("/move")
 async def make_move(move: Move):
-    global board, moves
+    global board, moves, chat_history
 
     # Make the player's move
     player_move = chess.Move.from_uci(move.from_square + move.to_square)
     if player_move in board.legal_moves:
         board.push(player_move)
         moves.append(player_move.uci())
+        chat_history.append(ChatMessage(sender="user", content=f"Moved {player_move.uci()}"))
 
         # Generate AI move
         ai_agent = ChessAgent(
@@ -95,6 +95,10 @@ async def make_move(move: Move):
         board.push(ai_move)
         moves.append(ai_move.uci())
 
+        # Add AI's move and shit talk to chat history
+        chat_history.append(ChatMessage(sender="ai", content=f"Moved {ai_move.uci()}"))
+        chat_history.append(ChatMessage(sender="ai", content=ai_agent.next_move.shit_talk))
+
         return {
             "player_move": player_move.uci(),
             "ai_move": ai_move.uci(),
@@ -102,6 +106,7 @@ async def make_move(move: Move):
             "game_over": board.is_game_over(),
             "reasoning": ai_agent.next_move.reasoning,
             "shit_talk": ai_agent.next_move.shit_talk,
+            "chat_history": chat_history,
         }
     else:
         return {"error": "Invalid move"}
@@ -109,9 +114,10 @@ async def make_move(move: Move):
 
 @app.get("/reset")
 async def reset_game():
-    global board, moves
+    global board, moves, chat_history
     board = chess.Board()
     moves = []
+    chat_history = []
     return {"message": "Game reset", "board_fen": board.fen()}
 
 
@@ -119,9 +125,10 @@ async def reset_game():
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     while True:
-        data = await websocket.receive_text()
-        response = f"Received: {data}"
-        await websocket.send_text(response)
+        data = await websocket.receive_json()
+        if data["type"] == "chat":
+            chat_history.append(ChatMessage(sender="user", content=data["message"]))
+            await websocket.send_json({"type": "chat_update", "chat_history": [msg.dict() for msg in chat_history]})
 
 
 if __name__ == "__main__":

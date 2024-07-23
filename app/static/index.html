@@ -56,6 +56,10 @@
       #send-button:hover {
         background-color: #45a049;
       }
+      #chat-form {
+        display: flex;
+        padding: 10px;
+      }
     </style>
   </head>
   <body>
@@ -63,8 +67,10 @@
       <div id="board"></div>
       <div class="chat-container">
         <div id="chat"></div>
-        <input type="text" id="user-input" placeholder="Type your message..." />
-        <button id="send-button">Send</button>
+        <form id="chat-form">
+          <input type="text" id="chat-input" placeholder="Type a message..." />
+          <button type="submit">Send</button>
+        </form>
       </div>
     </div>
 
@@ -99,22 +105,6 @@
       };
       board = Chessboard("board", config);
 
-      function addChatMessage(sender, message) {
-        let chatDiv = document.getElementById("chat");
-        chatDiv.innerHTML += `<p><strong>${sender}:</strong> ${message}</p>`;
-        chatDiv.scrollTop = chatDiv.scrollHeight;
-      }
-
-      document.getElementById("send-button").addEventListener("click", function () {
-        let userInput = document.getElementById("user-input");
-        let message = userInput.value;
-        if (message) {
-          addChatMessage("You", message);
-          socket.send(message);
-          userInput.value = "";
-        }
-      });
-
       async function sendMoveToBackend(from, to) {
         try {
           const response = await fetch("/move", {
@@ -145,6 +135,18 @@
         }
       }
 
+      function addChatMessage(sender, content) {
+        $("#chat").append(`<p><strong>${sender}:</strong> ${content}</p>`);
+        $("#chat").scrollTop($("#chat")[0].scrollHeight);
+      }
+
+      function updateChatHistory(chatHistory) {
+        $("#chat").empty();
+        chatHistory.forEach((msg) => {
+          addChatMessage(msg.sender, msg.content);
+        });
+      }
+
       // Function to reset the game
       async function resetGame() {
         try {
@@ -163,6 +165,23 @@
       resetButton.textContent = "Reset Game";
       resetButton.onclick = resetGame;
       document.querySelector(".chat-container").appendChild(resetButton);
+
+      // chat stuff
+      $("#chat-form").submit(function (e) {
+        e.preventDefault();
+        var message = $("#chat-input").val();
+        if (message.trim() !== "") {
+          socket.send(JSON.stringify({ type: "chat", message: message }));
+          $("#chat-input").val("");
+        }
+      });
+
+      socket.onmessage = function (event) {
+        var data = JSON.parse(event.data);
+        if (data.type === "chat_update") {
+          updateChatHistory(data.chat_history);
+        }
+      };
     </script>
   </body>
 </html>
