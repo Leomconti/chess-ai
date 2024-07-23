@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chess Game with Chat</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        margin: 0;
+        background-color: #f0f0f0;
+      }
+      .container {
+        display: flex;
+        gap: 20px;
+        background-color: white;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+      }
+      #board {
+        width: 400px;
+      }
+      .chat-container {
+        width: 300px;
+        display: flex;
+        flex-direction: column;
+      }
+      #chat {
+        height: 300px;
+        border: 1px solid #ccc;
+        overflow-y: auto;
+        padding: 10px;
+        margin-bottom: 10px;
+      }
+      #user-input {
+        width: 100%;
+        padding: 5px;
+        margin-bottom: 10px;
+      }
+      #send-button {
+        width: 100%;
+        padding: 5px;
+        background-color: #4caf50;
+        color: white;
+        border: none;
+        cursor: pointer;
+      }
+      #send-button:hover {
+        background-color: #45a049;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div id="board"></div>
+      <div class="chat-container">
+        <div id="chat"></div>
+        <input type="text" id="user-input" placeholder="Type your message..." />
+        <button id="send-button">Send</button>
+      </div>
+    </div>
+
+    <script>
+      let board = null;
+      let socket = new WebSocket("ws://localhost:8000/ws");
+
+      socket.onmessage = function (event) {
+        addChatMessage("AI", event.data);
+      };
+
+      function onDragStart(source, piece, position, orientation) {
+        // Allow the user to drag only white pieces
+        return piece.search(/^w/) !== -1;
+      }
+
+      function onDrop(source, target) {
+        // Send move to backend
+        sendMoveToBackend(source, target);
+      }
+
+      function onSnapEnd() {
+        // We'll update the board position after getting a response from the server
+      }
+
+      let config = {
+        draggable: true,
+        position: "start",
+        onDragStart: onDragStart,
+        onDrop: onDrop,
+        onSnapEnd: onSnapEnd,
+      };
+      board = Chessboard("board", config);
+
+      function addChatMessage(sender, message) {
+        let chatDiv = document.getElementById("chat");
+        chatDiv.innerHTML += `<p><strong>${sender}:</strong> ${message}</p>`;
+        chatDiv.scrollTop = chatDiv.scrollHeight;
+      }
+
+      document.getElementById("send-button").addEventListener("click", function () {
+        let userInput = document.getElementById("user-input");
+        let message = userInput.value;
+        if (message) {
+          addChatMessage("You", message);
+          socket.send(message);
+          userInput.value = "";
+        }
+      });
+
+      async function sendMoveToBackend(from, to) {
+        try {
+          const response = await fetch("/move", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ from_square: from, to_square: to }),
+          });
+          const data = await response.json();
+          if (data.error) {
+            addChatMessage("Error", data.error);
+            board.position(data.board_fen); // Reset to the current valid position
+            return;
+          }
+          board.position(data.board_fen);
+          addChatMessage("AI", `I moved ${data.ai_move}. ${data.reasoning}`);
+          updateStatus(data.game_over);
+        } catch (error) {
+          console.error("Error:", error);
+          addChatMessage("Error", "Failed to communicate with the server");
+        }
+      }
+
+      function updateStatus(gameOver) {
+        if (gameOver) {
+          addChatMessage("Game", "Game over!");
+        }
+      }
+
+      // Function to reset the game
+      async function resetGame() {
+        try {
+          const response = await fetch("/reset", { method: "GET" });
+          const data = await response.json();
+          board.position(data.board_fen);
+          addChatMessage("Game", data.message);
+        } catch (error) {
+          console.error("Error:", error);
+          addChatMessage("Error", "Failed to reset the game");
+        }
+      }
+
+      // Add a reset button
+      let resetButton = document.createElement("button");
+      resetButton.textContent = "Reset Game";
+      resetButton.onclick = resetGame;
+      document.querySelector(".chat-container").appendChild(resetButton);
+    </script>
+  </body>
+</html>
