@@ -79,41 +79,42 @@ async def read_root():
 async def make_move(move: Move):
     global board, moves, chat_history
 
-    # Make the player's move
-    player_move = chess.Move.from_uci(move.from_square + move.to_square)
-    if player_move in board.legal_moves:
-        board.push(player_move)
-        moves.append(player_move.uci())
-        # chat_history.append(ChatMessage(sender="user", content=f"Moved {player_move.uci()}"))
+    try:
+        # Make the player's move
+        player_move = chess.Move.from_uci(move.from_square + move.to_square)
+        if player_move in board.legal_moves:
+            board.push(player_move)
+            moves.append(player_move.uci())
 
-        # Generate AI move
-        ai_agent = ChessAgent(
-            board_state=str(board), legal_moves=str(board.legal_moves), history=str(moves), feedback=""
-        )
-        ai_move_str = ai_agent.next_move.move
-        ai_move = board.parse_san(ai_move_str)
+            # Generate AI move
+            ai_agent = ChessAgent(
+                board_state=str(board), legal_moves=str(board.legal_moves), history=str(moves), feedback=""
+            )
+            ai_move_str = ai_agent.next_move.move
+            ai_move = board.parse_san(ai_move_str)
 
-        # Make the AI's move
-        board.push(ai_move)
-        moves.append(ai_move.uci())
+            # Make the AI's move
+            board.push(ai_move)
+            moves.append(ai_move.uci())
 
-        # Add AI's move and shit talk to chat history
-        # chat_history.append(ChatMessage(sender="ai", content=f"Moved {ai_move.uci()}"))
-        chat_history.append(ChatMessage(sender="ai", content=ai_agent.next_move.shit_talk))
+            # Add AI's move and shit talk to chat history
+            chat_history.append(ChatMessage(sender="ai", content=ai_agent.next_move.shit_talk))
 
-        # Broadcast chat update to all connected clients
-        await broadcast_chat_update()
+            # Broadcast chat update to all connected clients
+            await broadcast_chat_update()
 
-        return {
-            "player_move": player_move.uci(),
-            "ai_move": ai_move.uci(),
-            "board_fen": board.fen(),
-            "game_over": board.is_game_over(),
-            "reasoning": ai_agent.next_move.reasoning,
-            "chat_history": [msg.dict() for msg in chat_history],
-        }
-    else:
-        return {"error": "Invalid move"}
+            return {
+                "player_move": player_move.uci(),
+                "ai_move": ai_move.uci(),
+                "board_fen": board.fen(),
+                "game_over": board.is_game_over(),
+                "reasoning": ai_agent.next_move.reasoning,
+                "chat_history": [msg.dict() for msg in chat_history],
+            }
+        else:
+            return {"error": "Invalid move", "board_fen": board.fen()}
+    except chess.InvalidMoveError:
+        return {"error": "Invalid move", "board_fen": board.fen()}
 
 
 @app.get("/reset")
